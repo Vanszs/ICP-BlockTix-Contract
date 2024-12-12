@@ -16,7 +16,7 @@ MotokoShinkai is a decentralized event management system powered by blockchain t
 
 ### **Tech Stack**
 - **Smart Contracts**: Solidity
-- **Blockchain**: Ethereum Holesky Testnet
+- **Blockchain**: EVM
 - **Frontend**: React.js
 - **Backend Integration**: Web3.js / Ethers.js
 - **Tools**:

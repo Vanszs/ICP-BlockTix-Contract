@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Motoko Shinkai - Event Management</title>
+    <link rel="stylesheet" href="styles.css" />
+    <!-- Tambahkan Favicon -->
+    <link rel="icon" type="image/png" href="favicon.png" />
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+
+    <!-- Tambahkan Data Kontrak -->
+    <script>
+      // Jika Anda ingin memasukkan data kontrak secara langsung
+      window.contractConfig = {
+        contractAddress: "0xb8c18EA449E4f93bBCA42821E0a9F861cdABE1a9", // Ganti dengan alamat kontrak yang benar
+        networkId: 17000, // ID jaringan Holesky
+        rpcUrl: "https://rpc.holesky.ethdevops.io",
+      };
+    </script>
+
+    <!-- Tambahkan File Bundle Aplikasi -->
+    <script src="./bundle.js"></script>
+  </body>
+</html>

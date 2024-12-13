@@ -1,86 +1,111 @@
 // SPDX-License-Identifier: MIT
+
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-contract MotokoShinkai is Ownable, ReentrancyGuard {
-    uint256 public constant ETH_TO_USD_RATE = 3000; // Fixed rate: 1 ETH = 3000 USD (6 desimal)
-    uint256 public constant USD_DECIMALS = 6; // Harga dalam USD dengan 6 desimal (misalnya $10.00 = 1000000)
+contract MotokoShinkai {
+    uint256 public constant ETH_TO_USD_RATE = 3000; // 1 ETH = $3000
+    uint256 public constant USD_DECIMALS = 6;
+
+    IERC20 public testToken;
 
     struct Event {
         string name;
-        uint256 date; // Timestamp
-        uint256 priceUSD; // Harga tiket dalam USD (6 desimal)
-        uint256 capacity; // Kapasitas tiket
-        uint256 ticketsSold; // Jumlah tiket terjual
-        bool isActive; // Status event
+        uint256 date;
+        uint256 priceUSD;
+        uint256 capacity;
+        uint256 ticketsSold;
+        bool isActive;
     }
 
-    uint256 public nextEventId;
     mapping(uint256 => Event) public events;
     mapping(uint256 => address[]) public eventAttendees;
+    uint256 public nextEventId;
 
     event EventCreated(uint256 eventId, string name, uint256 date, uint256 priceUSD, uint256 capacity);
-    event TicketPurchased(uint256 eventId, address buyer, uint256 amountPaid);
+    event TicketPurchased(uint256 eventId, address buyer, uint256 amountPaid, string paymentMethod);
+    event FundsWithdrawn(uint256 eventId, address recipient);
+    
 
-    // Membuat event baru
-    function createEvent(
-        string memory _name,
-        uint256 _date,
-        uint256 _priceUSD, // Harga tiket dalam USD (6 desimal)
-        uint256 _capacity
-    ) external onlyOwner {
-        require(_date > block.timestamp, "Event date must be in the future");
-        require(_capacity > 0, "Capacity must be greater than 0");
-
-        events[nextEventId] = Event({
-            name: _name,
-            date: _date,
-            priceUSD: _priceUSD,
-            capacity: _capacity,
-            ticketsSold: 0,
-            isActive: true
-        });
-
-        emit EventCreated(nextEventId, _name, _date, _priceUSD, _capacity);
-        nextEventId++;
+    constructor(address _tokenAddress) {
+        testToken = IERC20(_tokenAddress);
     }
 
-    // Membeli tiket
-    function buyTicket(uint256 _eventId) external payable nonReentrant {
+function createEvent(
+    string memory _name,
+    uint256 _date,
+    uint256 _priceUSD,
+    uint256 _capacity
+) external {
+    require(_date > block.timestamp, "Event date must be in the future");
+    require(_capacity > 0, "Capacity must be greater than 0");
+
+    events[nextEventId] = Event({
+        name: _name,
+        date: _date,
+        priceUSD: _priceUSD,
+        capacity: _capacity,
+        ticketsSold: 0,
+        isActive: true
+    });
+
+    emit EventCreated(nextEventId, _name, _date, _priceUSD, _capacity);
+    nextEventId++;
+}
+
+
+    function buyTicketWithETH(uint256 _eventId) external payable {
         Event storage myEvent = events[_eventId];
         require(myEvent.isActive, "Event is not active");
         require(myEvent.ticketsSold < myEvent.capacity, "Tickets sold out");
         require(block.timestamp < myEvent.date, "Event already started");
 
-        // Konversi harga USD ke ETH (1 ETH = 3000 USD)
         uint256 priceInWei = (myEvent.priceUSD * 1e18) / ETH_TO_USD_RATE;
         require(msg.value >= priceInWei, "Insufficient ETH sent");
 
-        // Tambahkan peserta ke event
         myEvent.ticketsSold++;
         eventAttendees[_eventId].push(msg.sender);
 
-        emit TicketPurchased(_eventId, msg.sender, msg.value);
+        emit TicketPurchased(_eventId, msg.sender, msg.value, "ETH");
 
-        // Refund kelebihan jika ada
         uint256 excess = msg.value - priceInWei;
         if (excess > 0) {
             payable(msg.sender).transfer(excess);
         }
     }
 
-    // Menarik dana hasil penjualan tiket
-    function withdrawFunds() external onlyOwner nonReentrant {
+    function buyTicketWithToken(uint256 _eventId) external {
+        Event storage myEvent = events[_eventId];
+        require(myEvent.isActive, "Event is not active");
+        require(myEvent.ticketsSold < myEvent.capacity, "Tickets sold out");
+        require(block.timestamp < myEvent.date, "Event already started");
+
+        uint256 priceInTokens = myEvent.priceUSD * (10 ** USD_DECIMALS);
+        require(testToken.allowance(msg.sender, address(this)) >= priceInTokens, "Token allowance too low");
+
+        testToken.transferFrom(msg.sender, address(this), priceInTokens);
+
+        myEvent.ticketsSold++;
+        eventAttendees[_eventId].push(msg.sender);
+
+        emit TicketPurchased(_eventId, msg.sender, priceInTokens, "TOKEN");
+    }
+
+    function withdrawFunds(uint256 _eventId) external {
+        Event storage myEvent = events[_eventId];
+        require(block.timestamp >= events[_eventId].date, "Event not yet ended");
+        require(myEvent.isActive, "Event already withdrawn");
+        myEvent.isActive = false;
+
         uint256 balance = address(this).balance;
         require(balance > 0, "No funds to withdraw");
+        payable(msg.sender).transfer(balance);
 
-        payable(owner()).transfer(balance);
+        emit FundsWithdrawn(_eventId, msg.sender);
     }
-
-    // Mendapatkan peserta untuk event tertentu
     function getEventAttendees(uint256 _eventId) external view returns (address[] memory) {
-        return eventAttendees[_eventId];
-    }
+    return eventAttendees[_eventId];
+}
+
 }

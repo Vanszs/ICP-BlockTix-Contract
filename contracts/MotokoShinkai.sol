@@ -2,13 +2,25 @@
 
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+// Contract: IERC20 interface from OpenZeppelin (Renamed to IERC20Interface)
+interface IERC20Interface {
+    function totalSupply() external view returns (uint256);
+    function balanceOf(address account) external view returns (uint256);
+    function transfer(address recipient, uint256 amount) external returns (bool);
+    function allowance(address owner, address spender) external view returns (uint256);
+    function approve(address spender, uint256 amount) external returns (bool);
+    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
+    event Transfer(address indexed from, address indexed to, uint256 value);
+    event Approval(address indexed owner, address indexed spender, uint256 value);
+}
+
+// Contract: MotokoShinkai
 
 contract MotokoShinkai {
     uint256 public constant ETH_TO_USD_RATE = 3000; // 1 ETH = $3000
     uint256 public constant USD_DECIMALS = 6;
 
-    IERC20 public testToken;
+    IERC20Interface public testToken;  // Updated to use the renamed interface
 
     struct Event {
         string name;
@@ -26,34 +38,32 @@ contract MotokoShinkai {
     event EventCreated(uint256 eventId, string name, uint256 date, uint256 priceUSD, uint256 capacity);
     event TicketPurchased(uint256 eventId, address buyer, uint256 amountPaid, string paymentMethod);
     event FundsWithdrawn(uint256 eventId, address recipient);
-    
 
     constructor(address _tokenAddress) {
-        testToken = IERC20(_tokenAddress);
+        testToken = IERC20Interface(_tokenAddress);  // Updated constructor to use renamed interface
     }
 
-function createEvent(
-    string memory _name,
-    uint256 _date,
-    uint256 _priceUSD,
-    uint256 _capacity
-) external {
-    require(_date > block.timestamp, "Event date must be in the future");
-    require(_capacity > 0, "Capacity must be greater than 0");
+    function createEvent(
+        string memory _name,
+        uint256 _date,
+        uint256 _priceUSD,
+        uint256 _capacity
+    ) external {
+        require(_date > block.timestamp, "Event date must be in the future");
+        require(_capacity > 0, "Capacity must be greater than 0");
 
-    events[nextEventId] = Event({
-        name: _name,
-        date: _date,
-        priceUSD: _priceUSD,
-        capacity: _capacity,
-        ticketsSold: 0,
-        isActive: true
-    });
+        events[nextEventId] = Event({
+            name: _name,
+            date: _date,
+            priceUSD: _priceUSD,
+            capacity: _capacity,
+            ticketsSold: 0,
+            isActive: true
+        });
 
-    emit EventCreated(nextEventId, _name, _date, _priceUSD, _capacity);
-    nextEventId++;
-}
-
+        emit EventCreated(nextEventId, _name, _date, _priceUSD, _capacity);
+        nextEventId++;
+    }
 
     function buyTicketWithETH(uint256 _eventId) external payable {
         Event storage myEvent = events[_eventId];
@@ -104,8 +114,17 @@ function createEvent(
 
         emit FundsWithdrawn(_eventId, msg.sender);
     }
-    function getEventAttendees(uint256 _eventId) external view returns (address[] memory) {
-    return eventAttendees[_eventId];
-}
 
+    function getEventAttendees(uint256 _eventId) external view returns (address[] memory) {
+        return eventAttendees[_eventId];
+    }
+
+    // New function to get all events
+    function getAllEvents() external view returns (Event[] memory) {
+        Event[] memory allEvents = new Event[](nextEventId);
+        for (uint256 i = 0; i < nextEventId; i++) {
+            allEvents[i] = events[i];
+        }
+        return allEvents;
+    }
 }

@@ -182,6 +182,164 @@ contract("MotokoShinkai", accounts => {
     // Pastikan user1 terdaftar sebagai attendee
     assert(attendees.includes(user1), "Attendee not recorded correctly");
   });
+
+    // ----------------------------------------------------------------
+  // TESTS FOR IDENTIFIED ISSUES / KEKURANGAN
+  // ----------------------------------------------------------------
+
+  it("should allow anyone to create an event (no owner restriction)", async () => {
+    // Mencoba membuat event dari user1 (bukan owner)
+    const receipt = await this.motoko.createEvent(
+      "User1's Event",
+      (await time.latest()).addn(3600),
+      50,
+      10,
+      { from: user1 }
+    );
+    // Jika event berhasil dibuat, ini menandakan tidak ada pembatasan hanya owner yang bisa membuat event.
+    expectEvent(receipt, "EventCreated");
+  });
+
+  it("should allow a non-creator to withdraw funds after event ends (no access control on withdrawal)", async () => {
+    // Buat event dari owner
+    const eventEndTime = (await time.latest()).addn(3600);
+    const createReceipt = await this.motoko.createEvent(
+      "No Access Control Event",
+      eventEndTime.toString(),
+      50,
+      10,
+      { from: owner }
+    );
+    const newEventId = createReceipt.logs[0].args.eventId.toString();
+
+    // Beli tiket dengan ETH oleh user1
+    await this.motoko.buyTicketWithETH(newEventId, {
+      from: user1,
+      value: web3.utils.toWei("0.0167", "ether"),
+    });
+
+    // Majukan waktu melewati event end time
+    await time.increaseTo(eventEndTime.addn(1));
+
+    // Sekarang user1 (bukan creator event, karena creator adalah owner) mencoba tarik dana
+    const initialBalanceUser1 = web3.utils.toBN(await web3.eth.getBalance(user1));
+    const receipt = await this.motoko.withdrawFunds(newEventId, { from: user1 });
+    expectEvent(receipt, "FundsWithdrawn", {
+      eventId: newEventId,
+      recipient: user1,
+    });
+
+    const finalBalanceUser1 = web3.utils.toBN(await web3.eth.getBalance(user1));
+    assert(finalBalanceUser1.gt(initialBalanceUser1), "User1 berhasil menarik dana padahal bukan pembuat event");
+  });
+
+  it("should mix funds of different events (no fund segregation)", async () => {
+    // Buat dua event berbeda
+    const eventEndTime1 = (await time.latest()).addn(3600);
+    const createReceipt1 = await this.motoko.createEvent(
+      "Event One",
+      eventEndTime1.toString(),
+      50,
+      10,
+      { from: owner }
+    );
+    const eventIdOne = createReceipt1.logs[0].args.eventId.toString();
+
+    const eventEndTime2 = (await time.latest()).addn(7200);
+    const createReceipt2 = await this.motoko.createEvent(
+      "Event Two",
+      eventEndTime2.toString(),
+      50,
+      10,
+      { from: owner }
+    );
+    const eventIdTwo = createReceipt2.logs[0].args.eventId.toString();
+
+    // Beli tiket event one
+    await this.motoko.buyTicketWithETH(eventIdOne, {
+      from: user1,
+      value: web3.utils.toWei("0.0167", "ether"),
+    });
+
+    // Beli tiket event two
+    await this.motoko.buyTicketWithETH(eventIdTwo, {
+      from: user1,
+      value: web3.utils.toWei("0.0167", "ether"),
+    });
+
+    // Majukan waktu ke setelah event one berakhir, tapi sebelum event two berakhir
+    await time.increaseTo(eventEndTime1.addn(10));
+
+    // Tarik dana dari event one, harusnya hanya dana event one yang ditarik
+    const initialBalanceOwner = web3.utils.toBN(await web3.eth.getBalance(owner));
+    const receipt = await this.motoko.withdrawFunds(eventIdOne, { from: owner });
+    expectEvent(receipt, "FundsWithdrawn", {
+      eventId: eventIdOne,
+      recipient: owner,
+    });
+    const finalBalanceOwner = web3.utils.toBN(await web3.eth.getBalance(owner));
+    assert(finalBalanceOwner.gt(initialBalanceOwner), "Owner harusnya mendapat dana dari event one");
+
+    // Sekarang cek apakah ada dana tersisa untuk event two (idealnya event two punya dana sendiri dan belum berakhir)
+    // Pada kontrak ini tidak ada pemisahan, sehingga penarikan event one juga mengosongkan kontrak.
+    const contractBalance = web3.utils.toBN(await web3.eth.getBalance(this.motoko.address));
+    assert(contractBalance.eq(web3.utils.toBN("0")), "Kontrak tidak lagi punya dana, dana event two ikut habis");
+  });
+
+  it("should not provide any function to withdraw tokens collected (no token withdrawal function)", async () => {
+    // Beli tiket event awal dengan token
+    await this.motoko.buyTicketWithToken(eventId, { from: user1 });
+
+    // Coba panggil fungsi yang seharusnya menarik token. Fungsi ini tidak ada.
+    // Kami coba dengan cara memanggil fungsi withdrawFunds (ETH), yang jelas tidak mengembalikan token.
+    // Karena tidak ada fungsi khusus untuk menarik token, kami hanya bisa membuktikan bahwa token tetap di kontrak.
+
+    // Cek saldo token kontrak dan owner
+    const contractTokenBalance = await this.token.balanceOf(this.motoko.address);
+    assert(contractTokenBalance.gt(web3.utils.toBN("0")), "Kontrak memiliki saldo token");
+
+    // Tidak ada fungsi withdraw token, jadi kita hanya tunjukkan bahwa token tetap tertahan
+    // Test ini hanya membuktikan kekurangan, bukan kegagalan.   
+  });
+
+  it("should allow overpayment with tokens without refund (no excess token refund mechanism)", async () => {
+    // Menaikkan allowance untuk user1 agar bisa transfer lebih dari harga tiket
+    await this.token.approve(this.motoko.address, web3.utils.toWei("100", "ether"), { from: user1 });
+
+    // Harga tiket dalam USD: 50 USD => 50 * 10^6 = 50.000000 token unit (asumsi 6 desimal)
+    // tapi token ini mungkin 18 desimal, kita hanya tunjukkan test yang overpay 
+    await this.motoko.buyTicketWithToken(eventId, { from: user1 });
+
+    // Test ini tidak revert. Artinya user1 bisa memberi allowance lebih besar, dan kontrak akan ambil token sesuai price.
+    // Tidak ada kembalian token. Sekali lagi, ini menunjukkan kekurangan, bukan kegagalan test.
+  });
+
+  // Test ini hanya menunjukkan bahwa tidak ada parameter untuk beli multiple tiket dalam satu panggilan
+  // Meski ini bukan bug yang menyebabkan revert, hanya menunjukkan bahwa fitur terbatas
+  it("should only buy one ticket at a time (no batch purchase)", async () => {
+    // Disini kita hanya menegaskan bahwa fungsi buyTicketWithETH/Token tidak menerima jumlah tiket.
+    // Pengujian ini mungkin tidak menghasilkan revert, tapi menunjukkan kekurangan fitur.
+    // Untuk mencoba "multiple", kita bisa panggil fungsi dua kali dan melihat bahwa ia membeli dua tiket terpisah.
+    await this.motoko.buyTicketWithETH(eventId, {
+      from: user1,
+      value: web3.utils.toWei("0.0167", "ether"),
+    });
+    await this.motoko.buyTicketWithETH(eventId, {
+      from: user1,
+      value: web3.utils.toWei("0.0167", "ether"),
+    });
+    // Dua pembelian terpisah menandakan tidak ada cara beli multiple tiket sekali jalan.
+    // Test ini lulus menunjukkan tidak ada kesalahan teknis, tapi meng-highlight kekurangan fitur.
+  });
+
+  // Menguji event dengan harga statis terhadap fluktuasi - ini sulit divalidasi dalam test statis.
+  // Kita hanya menunjukkan bahwa ETH_TO_USD_RATE adalah konstan dan tidak bisa diubah.
+  it("should have a static ETH to USD rate (no dynamic pricing)", async () => {
+    const rate = await this.motoko.ETH_TO_USD_RATE();
+    assert(rate.eq(web3.utils.toBN("3000")), "ETH to USD rate is static and cannot be changed");
+    // Test ini menunjukkan kekurangan: harga statis.
+  });
+
   
 
   

@@ -4,7 +4,7 @@ const HDWalletProvider = require('@truffle/hdwallet-provider');
 module.exports = {
   networks: {
     // Jaringan lokal untuk pengembangan
-    development: {
+    dev: {
       host: "127.0.0.1",     // Localhost
       port: 8545,            // Port default Ganache CLI
       network_id: "*",       // Menerima koneksi dari jaringan manapun

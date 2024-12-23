@@ -1,5 +1,5 @@
 
-## MotokoShinkai: Blockchain-Based Event Management System
+## BlockTix: Blockchain-Based Event Management System
 
 MotokoShinkai is a decentralized event management system powered by blockchain technology. It provides secure and transparent solutions for creating, managing, and participating in events. Built with Solidity for smart contracts and React for the frontend, MotokoShinkai ensures seamless ticketing and event operations.
 
@@ -69,12 +69,13 @@ Create a `.env` file in the root directory with the following:
 ```plaintext
 PRIVATE_KEY=your-private-key
 HOLESKY_RPC_URL=https://rpc.holesky.ethdevops.io
+Bitfinity_RPC = add here
 ```
 
 #### **4. Compile and Deploy Contracts**
 ```bash
 truffle compile
-truffle migrate --network holesky
+truffle migrate --network holesky/bitfinity
 ```
 
 #### **5. Setup Frontend**

@@ -1,74 +1,68 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-interface IERC20Interface {
-    function transfer(address recipient, uint256 amount) external returns (bool);
-    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
-    function allowance(address owner, address spender) external view returns (uint256);
-    function balanceOf(address account) external view returns (uint256);
-    function totalSupply() external view returns (uint256);
-}
-
 contract MotokoShinkai {
-    uint256 public constant ETH_TO_USD_RATE = 3000; 
-    uint256 public constant USD_DECIMALS = 6;
-    uint256 public constant ADMIN_FEE_PERCENTAGE = 10;
-    IERC20Interface public testToken;
+    // ----------------------------------------------------------------
+    // STORAGE: ADMIN, BLACKLIST, WHITELIST, CO-OWNERS
+    // ----------------------------------------------------------------
     address public owner;
-    uint256 public adminFeeETH;   
-    uint256 public adminFeeTokens; 
 
-    struct Event {
-        string name;
-        uint256 date;
-        uint256 priceUSD;
-        uint256 capacity;
-        uint256 ticketsSold;
-        bool isActive;
-        address creator;
-        uint256 balanceETH;
-        uint256 balanceTokens;
-        bool isCanceled; 
-    }
-    mapping(uint256 => mapping(address => uint256)) public userEthPaid;
-    mapping(uint256 => mapping(address => uint256)) public userTokenPaid;
-
-    mapping(uint256 => Event) public events;
-    mapping(address => bool) public blacklist;
-    mapping(address => bool) public whitelistedCreators;
+    // Admin & co-owner
     mapping(address => bool) public coOwners;
 
-    // Modifier baru untuk owner atau co-owner
-    modifier onlyOwnerOrCoOwner() {
-        require(msg.sender == owner || coOwners[msg.sender], "Only owner or co-owner can perform this action");
-        _;
-    }
-    
-    // Fungsi untuk menambahkan co-owner
-    function addCoOwner(address _coOwner) external onlyOwner {
-        require(_coOwner != address(0), "Invalid address");
-        coOwners[_coOwner] = true;
-    }
-    
-    // Fungsi untuk menghapus co-owner
-    function removeCoOwner(address _coOwner) external onlyOwner {
-        require(coOwners[_coOwner], "Address is not a co-owner");
-        coOwners[_coOwner] = false;
+    // Sistem blacklist & whitelist
+    mapping(address => bool) public blacklist;
+    mapping(address => bool) public whitelistedCreators;
+
+    // Fee admin
+    uint256 public constant ADMIN_FEE_PERCENTAGE = 10; 
+    uint256 public adminFeeETH;   
+
+    // ----------------------------------------------------------------
+    // EVENT STRUCT & STORAGE
+    // ----------------------------------------------------------------
+    struct EventInfo {
+        string name;          
+        uint256 date;         
+        uint256 priceETHWei;  
+        uint256 capacity;     
+        uint256 sold;         
+        bool isActive;        
+        bool isCanceled;      
+        address creator;      
+        uint256 balanceETH;   
     }
 
     uint256 public nextEventId;
+    mapping(uint256 => EventInfo) public events;
 
-    event EventCreated(uint256 eventId, string name, uint256 date, uint256 priceUSD, uint256 capacity, address creator);
-    event EventUpdated(uint256 eventId, uint256 newDate, uint256 newPriceUSD, uint256 newCapacity);
-    event TicketPurchased(uint256 eventId, address buyer, uint256 amountPaid, string paymentMethod);
-    event AdminFeeWithdrawn(address admin, uint256 feeETH, uint256 feeTokens);
-    event FundsWithdrawn(uint256 eventId, address recipient, uint256 balanceETH, uint256 balanceTokens);
-    event BlacklistUpdated(address indexed user, bool isBlacklisted);
-    event Whitelistadd(address);
+    // Untuk mencatat berapa ETH yang pernah user bayarkan ke suatu event, guna keperluan refund
+    mapping(uint256 => mapping(address => uint256)) public userEthPaid;
+    mapping(uint256 => mapping(address => uint256)) public ticketsBought;
+
+
+    // ----------------------------------------------------------------
+    // EVENTS (LOG)
+    // ----------------------------------------------------------------
     event EthReceived(address indexed sender, uint256 amount);
+    event EventCreated(uint256 eventId, string name, uint256 date, uint256 priceETHWei, uint256 capacity, address creator);
+    event TicketPurchased(uint256 eventId, address buyer, uint256 amountPaid);
+    event FundsWithdrawn(uint256 eventId, address recipient, uint256 balanceETH);
+    event AdminFeeWithdrawn(address admin, uint256 feeETH);
+    event EventCanceled(uint256 eventId);
+    event BlacklistUpdated(address indexed user, bool isBlacklisted);
+    event Whitelistadd(address indexed creator);
 
+    // ----------------------------------------------------------------
+    // MODIFIERS
+    // ----------------------------------------------------------------
     modifier onlyOwner() {
         require(msg.sender == owner, "Only owner can perform this action");
+        _;
+    }
+
+    modifier onlyOwnerOrCoOwner() {
+        require(msg.sender == owner || coOwners[msg.sender], "Only owner or co-owner can perform this action");
         _;
     }
 
@@ -87,9 +81,11 @@ contract MotokoShinkai {
         _;
     }
 
-    constructor(address _tokenAddress) {
+    // ----------------------------------------------------------------
+    // CONSTRUCTOR & RECEIVE/FALLBACK
+    // ----------------------------------------------------------------
+    constructor() {
         owner = msg.sender;
-        testToken = IERC20Interface(_tokenAddress);
     }
 
     receive() external payable {
@@ -100,145 +96,22 @@ contract MotokoShinkai {
         emit EthReceived(msg.sender, msg.value);
     }
 
-    function createEvent(
-        string memory _name,
-        uint256 _date,
-        uint256 _priceUSD,
-        uint256 _capacity
-    ) external onlyWhitelisted {
-        require(_date > block.timestamp, "Event date must be in the future");
-        require(_capacity > 0, "Capacity must be greater than 0");
-        events[nextEventId] = Event({
-            name: _name,
-            date: _date,
-            priceUSD: _priceUSD, 
-            capacity: _capacity,
-            ticketsSold: 0,
-            isActive: true,
-            creator: msg.sender,
-            balanceETH: 0,
-            balanceTokens: 0,
-            isCanceled: false // default false
-        });
-
-        emit EventCreated(nextEventId, _name, _date, _priceUSD, _capacity, msg.sender);
-        nextEventId++;
+    // ----------------------------------------------------------------
+    // CO-OWNER MANAGEMENT
+    // ----------------------------------------------------------------
+    function addCoOwner(address _coOwner) external onlyOwner {
+        require(_coOwner != address(0), "Invalid address");
+        coOwners[_coOwner] = true;
     }
 
-    function buyTicketWithETH(uint256 _eventId) external payable notBlacklisted {
-        Event storage myEvent = events[_eventId];
-        require(myEvent.isActive, "Event is not active");
-        require(!myEvent.isCanceled, "Event is canceled");
-        require(myEvent.ticketsSold < myEvent.capacity, "Tickets sold out");
-        require(block.timestamp < myEvent.date, "Event already started");
-
-        uint256 priceInWei = (myEvent.priceUSD * 1e18) / ETH_TO_USD_RATE;
-        uint256 adminFee = (priceInWei * ADMIN_FEE_PERCENTAGE) / 100;
-        uint256 netToEvent = priceInWei - adminFee;
-
-        require(msg.value >= priceInWei, "Insufficient ETH sent");
-
-        myEvent.ticketsSold++;
-        myEvent.balanceETH += netToEvent; 
-        adminFeeETH += adminFee; 
-
-        userEthPaid[_eventId][msg.sender] += netToEvent;
-
-        emit TicketPurchased(_eventId, msg.sender, msg.value, "ETH");
+    function removeCoOwner(address _coOwner) external onlyOwner {
+        require(coOwners[_coOwner], "Address is not a co-owner");
+        coOwners[_coOwner] = false;
     }
 
-    function buyTicketWithToken(uint256 _eventId) external notBlacklisted {
-        Event storage myEvent = events[_eventId];
-        require(myEvent.isActive, "Event is not active");
-        require(!myEvent.isCanceled, "Event is canceled");
-        require(myEvent.ticketsSold < myEvent.capacity, "Tickets sold out");
-        require(block.timestamp < myEvent.date, "Event already started");
-
-        uint256 priceInTokens = myEvent.priceUSD * (10**USD_DECIMALS);
-        uint256 adminFee = (priceInTokens * ADMIN_FEE_PERCENTAGE) / 100;
-        uint256 netToEvent = priceInTokens - adminFee;
-
-        uint256 totalRequired = priceInTokens; 
-        uint256 allowance = testToken.allowance(msg.sender, address(this));
-
-        require(allowance >= totalRequired, "Token allowance too low");
-
-        // Transfer totalRequired ke kontrak
-        // netToEvent buat event, adminFee buat global admin
-        testToken.transferFrom(msg.sender, address(this), totalRequired);
-        
-        myEvent.ticketsSold++;
-        myEvent.balanceTokens += netToEvent; 
-        adminFeeTokens += adminFee;
-
-        // Simpan total akumulasi Token yang pernah dibayarkan user ini untuk event ini
-        userTokenPaid[_eventId][msg.sender] += netToEvent;
-
-        emit TicketPurchased(_eventId, msg.sender, totalRequired, "TOKEN");
-    }
-
-    function withdrawEventFunds(uint256 _eventId) external onlyCreator(_eventId) {
-        Event storage myEvent = events[_eventId];
-        require(myEvent.isActive, "Event already withdrawn or not active");
-        require(!myEvent.isCanceled, "Event is canceled, cannot withdraw. Please refund users.");
-        require(block.timestamp >= myEvent.date, "Event not yet ended");
-
-        uint256 balanceETH = myEvent.balanceETH;
-        uint256 balanceTokens = myEvent.balanceTokens;
-
-        require(balanceETH > 0 || balanceTokens > 0, "No funds to withdraw");
-
-        // Kirim ETH
-        if (balanceETH > 0) {
-            payable(msg.sender).transfer(balanceETH);
-        }
-        // Kirim Token
-        if (balanceTokens > 0) {
-            require(testToken.transfer(msg.sender, balanceTokens), "Token transfer failed");
-        }
-
-        myEvent.balanceETH = 0;
-        myEvent.balanceTokens = 0;
-        myEvent.isActive = false;
-
-        emit FundsWithdrawn(_eventId, msg.sender, balanceETH, balanceTokens);
-    }
-
-    function withdrawAdminFee() external onlyOwner {
-        uint256 feeETH = adminFeeETH;
-        uint256 feeTokens = adminFeeTokens;
-
-        if (feeETH > 0) {
-            payable(owner).transfer(feeETH);
-        }
-        if (feeTokens > 0) {
-            require(testToken.transfer(owner, feeTokens), "Token transfer failed");
-        }
-
-        adminFeeETH = 0;
-        adminFeeTokens = 0;
-
-        emit AdminFeeWithdrawn(owner, feeETH, feeTokens);
-    }
-
-    function editEvent(
-        uint256 _eventId,
-        uint256 _newDate,
-        uint256 _newPriceUSD,
-        uint256 _newCapacity
-    ) external onlyCreator(_eventId) {
-        Event storage myEvent = events[_eventId];
-        require(_newDate > block.timestamp, "New date must be in the future");
-        require(!myEvent.isCanceled, "Event is canceled");
-        require(_newCapacity >= myEvent.ticketsSold, "New capacity must be >= tickets sold");
-
-        myEvent.date = _newDate;
-        myEvent.priceUSD = _newPriceUSD;
-        myEvent.capacity = _newCapacity;
-
-        emit EventUpdated(_eventId, _newDate, _newPriceUSD, _newCapacity);
-    }
-
+    // ----------------------------------------------------------------
+    // BLACKLIST & WHITELIST MANAGEMENT
+    // ----------------------------------------------------------------
     function updateBlacklist(address _user, bool _isBlacklisted) external onlyOwnerOrCoOwner {
         require(_user != address(0), "Invalid address");
         require(blacklist[_user] != _isBlacklisted, "No changes in blacklist status");
@@ -261,8 +134,171 @@ contract MotokoShinkai {
         emit Whitelistadd(_creator);
     }
 
-    function getAllEvents() external view returns (Event[] memory) {
-        Event[] memory allEvents = new Event[](nextEventId);
+    // ----------------------------------------------------------------
+    // CREATE & EDIT EVENT
+    // ----------------------------------------------------------------
+    function createEvent(
+        string memory _name,
+        uint256 _date,
+        uint256 _priceETHWei,
+        uint256 _capacity
+    ) external onlyWhitelisted {
+        require(_date > block.timestamp, "Event date must be in the future");
+        require(_capacity > 0, "Capacity must be greater than 0");
+
+        events[nextEventId] = EventInfo({
+            name: _name,
+            date: _date,
+            priceETHWei: _priceETHWei,
+            capacity: _capacity,
+            sold: 0,
+            isActive: true,
+            isCanceled: false,
+            creator: msg.sender,
+            balanceETH: 0
+        });
+
+        emit EventCreated(
+            nextEventId,
+            _name,
+            _date,
+            _priceETHWei,
+            _capacity,
+            msg.sender
+        );
+
+        nextEventId++;
+    }
+
+    function editEvent(
+        uint256 _eventId,
+        uint256 _newDate,
+        uint256 _newPriceETHWei,
+        uint256 _newCapacity
+    ) external onlyCreator(_eventId) {
+        EventInfo storage myEvent = events[_eventId];
+        require(_newDate > block.timestamp, "New date must be in the future");
+        require(!myEvent.isCanceled, "Event is canceled");
+        require(_newCapacity >= myEvent.sold, "New capacity must be >= tickets sold");
+
+        myEvent.date = _newDate;
+        myEvent.priceETHWei = _newPriceETHWei;
+        myEvent.capacity = _newCapacity;
+    }
+
+    // ----------------------------------------------------------------
+    // BUY TICKET: ETH
+    // ----------------------------------------------------------------
+function buyTicketWithETH(uint256 _eventId, uint256 ticketCount) external payable notBlacklisted {
+    EventInfo storage myEvent = events[_eventId];
+    require(myEvent.isActive, "Event is not active");
+    require(!myEvent.isCanceled, "Event is canceled");
+    require(myEvent.sold + ticketCount <= myEvent.capacity, "Not enough tickets available");
+    require(block.timestamp < myEvent.date, "Event already started or ended");
+    require(ticketCount > 0, "Ticket count must be greater than 0");
+
+    uint256 totalPriceInWei = myEvent.priceETHWei * ticketCount; 
+    require(msg.value >= totalPriceInWei, "Insufficient ETH sent");
+
+    // Hitung admin fee untuk semua tiket
+    uint256 adminFee = (totalPriceInWei * ADMIN_FEE_PERCENTAGE) / 100;
+    uint256 netToEvent = totalPriceInWei - adminFee;
+
+    // Update penjualan
+    myEvent.sold += ticketCount;
+    myEvent.balanceETH += netToEvent; 
+    adminFeeETH += adminFee; 
+
+    // Simpan total ETH user yang dibayar (untuk refund)
+    userEthPaid[_eventId][msg.sender] += totalPriceInWei;
+
+    // Refund jika ada kelebihan pembayaran
+    if (msg.value > totalPriceInWei) {
+        payable(msg.sender).transfer(msg.value - totalPriceInWei);
+    }
+
+    emit TicketPurchased(_eventId, msg.sender, totalPriceInWei);
+}
+
+
+    // ----------------------------------------------------------------
+    // WITHDRAW EVENT FUNDS (CREATOR)
+    // ----------------------------------------------------------------
+    function withdrawEventFunds(uint256 _eventId) external onlyCreator(_eventId) {
+        EventInfo storage myEvent = events[_eventId];
+        require(myEvent.isActive, "Event not active or already withdrawn");
+        require(!myEvent.isCanceled, "Event canceled, must refund users");
+        require(block.timestamp >= myEvent.date, "Event not yet ended");
+
+        uint256 balanceETH = myEvent.balanceETH;
+        require(balanceETH > 0, "No funds to withdraw");
+
+        payable(msg.sender).transfer(balanceETH);
+        myEvent.balanceETH = 0;
+        myEvent.isActive = false;
+
+        emit FundsWithdrawn(_eventId, msg.sender, balanceETH);
+    }
+
+    // ----------------------------------------------------------------
+    // WITHDRAW ADMIN FEE (OWNER)
+    // ----------------------------------------------------------------
+    function withdrawAdminFee() external onlyOwnerOrCoOwner() {
+        uint256 feeETH = adminFeeETH;
+
+        if (feeETH > 0) {
+            payable(owner).transfer(feeETH);
+            adminFeeETH = 0;
+        }
+
+        emit AdminFeeWithdrawn(owner, feeETH);
+    }
+
+       // ----------------------------------------------------------------
+    // CANCEL EVENT (CREATOR) & REFUND
+    // ----------------------------------------------------------------
+    function cancelEvent(uint256 _eventId) external onlyCreator(_eventId) {
+        EventInfo storage myEvent = events[_eventId];
+        require(!myEvent.isCanceled, "Event already canceled");
+        myEvent.isCanceled = true;
+
+        emit EventCanceled(_eventId);
+    }
+
+    function refund(uint256 _eventId) external notBlacklisted {
+        EventInfo storage myEvent = events[_eventId];
+        require(myEvent.isCanceled, "Event not canceled");
+
+        uint256 ethAmount = userEthPaid[_eventId][msg.sender];
+
+        require(ethAmount > 0 , "No tickets purchased or already refunded");
+
+        // Refund ETH
+        if (ethAmount > 0) {
+            require(myEvent.balanceETH >= ethAmount, "Not enough ETH in event balance");
+            myEvent.balanceETH -= ethAmount;
+            userEthPaid[_eventId][msg.sender] = 0;
+            payable(msg.sender).transfer(ethAmount);
+        }
+
+    }
+
+    // ----------------------------------------------------------------
+    // EXTRA: CO-OWNER FORCE WITHDRAW & VIEW FUNCTIONS
+    // ----------------------------------------------------------------
+    /**
+     * Contoh function untuk co-owner/owner menarik SELURUH ETH di kontrak
+     * (misal untuk emergensi). Pastikan paham risikonya.
+     */
+    function TestwithdrawAllFunds() external onlyOwnerOrCoOwner {
+        uint256 contractBalance = address(this).balance; 
+        require(contractBalance > 0, "No funds to withdraw");
+        (bool success, ) = payable(owner).call{value: contractBalance}("");
+        require(success, "Transfer failed");
+    }
+
+    function getAllEvents() external view returns (EventInfo[] memory) {
+        EventInfo[] memory allEvents = new EventInfo[](nextEventId);
         for (uint256 i = 0; i < nextEventId; i++) {
             allEvents[i] = events[i];
         }
@@ -279,52 +315,7 @@ contract MotokoShinkai {
         }
     }
 
-    function TestwithdrawAllFunds() external onlyOwnerOrCoOwner {
-        uint256 contractBalance = address(this).balance; 
-        require(contractBalance > 0, "No funds to withdraw");
-        (bool success, ) = payable(owner).call{value: contractBalance}("");
-        require(success, "Transfer failed");
+    function CheckProfit() public view returns (uint256) {
+        return (adminFeeETH);
     }
-
-
-    /**
-     * @notice Hanya creator event yang boleh membatalkan event
-     */
-    function cancelEvent(uint256 _eventId) external onlyCreator(_eventId) {
-        Event storage myEvent = events[_eventId];
-        require(!myEvent.isCanceled, "Event already canceled");
-        myEvent.isCanceled = true;
-    }
-
-    /**
-     * @notice Refund bagi user jika event dibatalkan dan user punya tiket yang belum di-refund
-     */
-    function refund(uint256 _eventId) external notBlacklisted {
-        Event storage myEvent = events[_eventId];
-        require(myEvent.isCanceled, "Event is not canceled");
-
-        uint256 ethAmount = userEthPaid[_eventId][msg.sender];
-        uint256 tokenAmount = userTokenPaid[_eventId][msg.sender];
-
-        require(ethAmount > 0 || tokenAmount > 0, "No tickets purchased or already refunded");
-
-        if (ethAmount > 0) {
-            require(myEvent.balanceETH >= ethAmount, "Not enough ETH in event balance for refund");
-            myEvent.balanceETH -= ethAmount;
-            userEthPaid[_eventId][msg.sender] = 0; // tandai sudah refund
-            payable(msg.sender).transfer(ethAmount);
-        }
-
-        if (tokenAmount > 0) {
-            require(myEvent.balanceTokens >= tokenAmount, "Not enough tokens in event balance for refund");
-            myEvent.balanceTokens -= tokenAmount;
-            userTokenPaid[_eventId][msg.sender] = 0; // tandai sudah refund
-            require(testToken.transfer(msg.sender, tokenAmount), "Token transfer failed");
-        }
-    }
-
-    function CheckProfit() public view returns (uint256, uint256) {
-        return (adminFeeETH, adminFeeTokens);
-    }
-
 }

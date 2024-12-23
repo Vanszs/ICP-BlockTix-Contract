@@ -1,5 +1,5 @@
 
-## MotokoShinkai: Blockchain-Based Event Management System
+## BlockTix: Blockchain-Based Event Management System
 
 MotokoShinkai is a decentralized event management system powered by blockchain technology. It provides secure and transparent solutions for creating, managing, and participating in events. Built with Solidity for smart contracts and React for the frontend, MotokoShinkai ensures seamless ticketing and event operations.
 
